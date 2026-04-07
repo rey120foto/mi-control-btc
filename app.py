@@ -44,7 +44,7 @@ st.title("📊 Mi Centro de Mando BTC")
 # Fila 1: Métricas Principales
 m1, m2, m3 = st.columns(3)
 m1.metric("Saldo en Wallet", f"{total_btc:.8f} BTC")
-m2.metric("Precio Promedio", f"${promedio:,.2;f}")
+m2.metric("Precio Promedio", f"${promedio:,.2f}")
 m3.metric("Inversión Total", f"${inversion_total:,.2f}")
 
 # Fila 2: Rendimiento en Vivo
