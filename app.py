@@ -5,22 +5,18 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Mi Wallet BTC", layout="wide")
+st.set_page_config(page_title="BTC Command Center", layout="wide", page_icon="🧡")
 db_file = 'historial_btc.csv'
 
-# --- FUNCIÓN DE PRECIO (AHORA CON COINGECKO + BINANCE) ---
+# --- FUNCIÓN DE PRECIO ---
 def obtener_precio_btc():
-    # Intento 1: CoinGecko (Más estable para web)
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-        response = requests.get(url, timeout=10)
-        return float(response.json()['bitcoin']['usd'])
+        return float(requests.get(url, timeout=10).json()['bitcoin']['usd'])
     except:
-        # Intento 2: Binance (Respaldo)
         try:
             url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-            response = requests.get(url, timeout=10)
-            return float(response.json()['price'])
+            return float(requests.get(url, timeout=10).json()['price'])
         except:
             return 0.0
 
@@ -31,24 +27,10 @@ def cargar_datos():
         return df
     return pd.DataFrame(columns=['Fecha', 'Tipo', 'Precio_USD', 'Monto_BTC'])
 
-# --- INICIO DE DATOS ---
+# --- LÓGICA ---
 df = cargar_datos()
+precio_actual = obtener_precio_btc()
 
-# BOTÓN DE ACTUALIZAR EN EL SIDEBAR PARA QUE SEA MÁS FUERTE
-with st.sidebar:
-    st.title("⚙️ Controles")
-    if st.button("🔄 REFRESCAR PRECIO AHORA", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-    
-    precio_actual = obtener_precio_btc()
-    
-    # Si sigue fallando la conexión, dejamos que tú pongas el precio a mano
-    if precio_actual == 0:
-        st.warning("⚠️ No pude conectar con el mercado.")
-        precio_actual = st.number_input("Introduce precio actual manualmente:", value=70000.0)
-
-# --- CÁLCULOS ---
 compras_df = df[df['Tipo']=='Compra']
 retiros_df = df[df['Tipo']=='Retiro']
 
@@ -60,57 +42,67 @@ valor_actual_wallet = total_btc * precio_actual
 ganancia_usd = valor_actual_wallet - (total_btc * promedio) if total_btc > 0 else 0
 porcentaje = ((precio_actual - promedio) / promedio * 100) if promedio > 0 else 0
 
-# --- INTERFAZ ---
-st.title("📊 Mi Centro de Mando BTC")
+# --- INTERFAZ (TABS) ---
+st.title("🧡 Mi Centro de Mando BTC")
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Saldo en Wallet", f"{total_btc:.8f} BTC")
-m2.metric("Precio Promedio", f"${promedio:,.2f}")
-m3.metric("Inversión Total", f"${inversion_total:,.2f}")
+# Pestañas para organizar todo
+tab1, tab2, tab3 = st.tabs(["📈 Dashboard Real", "📋 Historial", "➕ Registrar"])
 
-st.divider()
+with tab1:
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Saldo en Wallet", f"{total_btc:.8f} BTC")
+    m2.metric("Precio Promedio", f"${promedio:,.2f}")
+    m3.metric("Inversión Total", f"${inversion_total:,.2f}")
 
-# RENDIMIENTO
-st.subheader(f"🚀 Mercado en Vivo (Precio BTC: ${precio_actual:,.2f})")
-c1, c2, c3 = st.columns(3)
-color_delta = "normal" if ganancia_usd >= 0 else "inverse"
+    st.divider()
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader(f"🚀 Rendimiento (Precio: ${precio_actual:,.2f})")
+        c1, c2, c3 = st.columns(3)
+        color_delta = "normal" if ganancia_usd >= 0 else "inverse"
+        c1.metric("Valor Actual ($)", f"${valor_actual_wallet:,.2f}")
+        c2.metric("Ganancia/Pérdida", f"${ganancia_usd:,.2f}", delta=f"${ganancia_usd:,.2f}", delta_color=color_delta)
+        c3.metric("Rendimiento %", f"{porcentaje:.2f}%", delta=f"{porcentaje:.2f}%", delta_color=color_delta)
+    
+    with col2:
+        st.info("💡 Tip: Refresca el navegador para actualizar el precio del mercado.")
 
-c1.metric("Valor Actual ($)", f"${valor_actual_wallet:,.2f}")
-c2.metric("Ganancia/Pérdida ($)", f"${ganancia_usd:,.2f}", delta=f"${ganancia_usd:,.2f}", delta_color=color_delta)
-c3.metric("Rendimiento (%)", f"{porcentaje:.2f}%", delta=f"{porcentaje:.2f}%", delta_color=color_delta)
-
-st.divider()
-
-# --- REGISTRO ---
-with st.sidebar:
-    st.header("📝 Nueva Operación")
-    with st.form("registro_form", clear_on_submit=True):
-        tipo = st.selectbox("Tipo", ["Compra", "Retiro"])
-        fecha = st.date_input("Fecha", datetime.now())
-        precio_f = st.number_input("Precio USD", value=precio_actual, format="%.2f")
-        monto_f = st.number_input("Monto BTC", min_value=0.0, format="%.8f", step=0.00000001)
+with tab2:
+    st.subheader("📜 Movimientos Registrados")
+    if not df.empty:
+        # AQUÍ ESTÁ LA CORRECCIÓN DEL ERROR DE FORMATO (image_24dd65.png)
+        st.dataframe(
+            df.iloc[::-1], 
+            use_container_width=True,
+            column_config={
+                "Monto_BTC": st.column_config.NumberColumn("Monto BTC", format="%.8f"),
+                "Precio_USD": st.column_config.NumberColumn("Precio USD", format="$%.2f") # Corregido
+            }
+        )
         
-        if st.form_submit_button("🚀 Guardar Registro"):
-            if monto_f > 0:
-                nueva_fila = pd.DataFrame([[str(fecha), tipo, precio_f, monto_f]], columns=df.columns)
-                df_final = pd.concat([df, nueva_fila], ignore_index=True)
-                df_final.to_csv(db_file, index=False)
-                st.rerun()
-
-    if st.button("🗑️ Borrar última fila"):
-        if not df.empty:
-            df = df[:-1]
-            df.to_csv(db_file, index=False)
+        st.divider()
+        if st.button("🗑️ Borrar ÚLTIMA entrada"):
+            df[:-1].to_csv(db_file, index=False)
             st.rerun()
+    else:
+        st.write("No hay datos todavía.")
 
-# --- HISTORIAL ---
-st.subheader("📜 Historial Detallado")
-if not df.empty:
-    st.dataframe(
-        df.iloc[::-1], 
-        use_container_width=True,
-        column_config={
-            "Monto_BTC": st.column_config.NumberColumn("Monto BTC", format="%.8f"),
-            "Precio_USD": st.column_config.NumberColumn("Precio USD", format="$%.,2f")
-        }
-    )
+with tab3:
+    st.subheader("📝 Nueva Transacción")
+    with st.form("main_form", clear_on_submit=True):
+        f1, f2 = st.columns(2)
+        with f1:
+            tipo = st.selectbox("Operación", ["Compra", "Retiro"])
+            fecha = st.date_input("Fecha", datetime.now())
+        with f2:
+            precio_f = st.number_input("Precio al momento (USD)", value=precio_actual, format="%.2f")
+            monto_f = st.number_input("Cantidad de BTC", min_value=0.0, format="%.8f", step=0.00000001)
+        
+        submit = st.form_submit_button("✅ Guardar en la Nube")
+        
+        if submit and monto_f > 0:
+            nueva_fila = pd.DataFrame([[str(fecha), tipo, precio_f, monto_f]], columns=df.columns)
+            pd.concat([df, nueva_fila], ignore_index=True).to_csv(db_file, index=False)
+            st.success("¡Datos guardados!")
+            st.rerun()
