@@ -8,22 +8,22 @@ from datetime import datetime
 st.set_page_config(page_title="Mi Wallet BTC", layout="wide")
 db_file = 'historial_btc.csv'
 
-# --- LÓGICA DE ACTUALIZACIÓN ---
-if 'count' not in st.session_state:
-    st.session_state.count = 0
+# --- LÓGICA DE PRECIO EN VIVO ---
+# Usamos session_state para forzar que el precio cambie de verdad
+if 'precio_fresco' not in st.session_state:
+    st.session_state.precio_fresco = 0.0
 
-def forzar_actualizacion():
-    st.session_state.count += 1
-    st.rerun()
-
-def obtener_precio_btc():
+def obtener_precio_real():
     try:
-        # Añadimos un parámetro aleatorio para evitar que el navegador guarde el precio viejo
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT&cb={st.session_state.count}"
+        # Usamos un parámetro timestamp para que la API no nos de un resultado guardado (cache)
+        ts = int(datetime.now().timestamp())
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT&_={ts}"
         response = requests.get(url, timeout=5)
-        return float(response.json()['price'])
+        precio = float(response.json()['price'])
+        st.session_state.precio_fresco = precio
+        return precio
     except:
-        return 0.0
+        return st.session_state.precio_fresco if st.session_state.precio_fresco > 0 else 0.0
 
 def cargar_datos():
     if os.path.exists(db_file):
@@ -32,9 +32,14 @@ def cargar_datos():
         return df
     return pd.DataFrame(columns=['Fecha', 'Tipo', 'Precio_USD', 'Monto_BTC'])
 
-# --- CÁLCULOS ---
+# --- PROCESAMIENTO ---
 df = cargar_datos()
-precio_actual = obtener_precio_btc()
+
+# Si es la primera vez o el usuario pulsa el botón, buscamos precio
+if st.session_state.precio_fresco == 0:
+    precio_actual = obtener_precio_real()
+else:
+    precio_actual = st.session_state.precio_fresco
 
 compras_df = df[df['Tipo']=='Compra']
 retiros_df = df[df['Tipo']=='Retiro']
@@ -52,24 +57,25 @@ st.title("📊 Mi Centro de Mando BTC")
 
 m1, m2, m3 = st.columns(3)
 m1.metric("Saldo Real en Wallet", f"{total_btc:.8f} BTC")
-m2.metric("Precio Promedio de Compra", f"${promedio:,.2f}")
-m3.metric("Inversión Neta Actual", f"${inversion_total:,.2f}")
+m2.metric("Precio Promedio", f"${promedio:,.2f}")
+m3.metric("Inversión Total", f"${inversion_total:,.2f}")
 
 st.divider()
 
-# RENDIMIENTO EN VIVO
-st.subheader(f"🚀 Mercado en Vivo (Precio Actual: ${precio_actual:,.2f})")
+# BLOQUE DE MERCADO
+st.subheader(f"🚀 Mercado en Vivo (Precio: ${precio_actual:,.2f})")
 c1, c2, c3 = st.columns(3)
 
-# Definir color del delta
-delta_color = "normal" if ganancia_usd >= 0 else "inverse"
+color_delta = "normal" if ganancia_usd >= 0 else "inverse"
 
 c1.metric("Valor de tu Wallet HOY", f"${valor_actual_wallet:,.2f}")
-c2.metric("Ganancia/Pérdida Total", f"${ganancia_usd:,.2f}", delta=f"${ganancia_usd:,.2f}", delta_color=delta_color)
-c3.metric("Rendimiento del Portafolio", f"{porcentaje:.2f}%", delta=f"{porcentaje:.2f}%", delta_color=delta_color)
+c2.metric("Ganancia/Pérdida Total", f"${ganancia_usd:,.2f}", delta=f"${ganancia_usd:,.2f}", delta_color=color_delta)
+c3.metric("Rendimiento", f"{porcentaje:.2f}%", delta=f"{porcentaje:.2f}%", delta_color=color_delta)
 
+# EL BOTÓN DE ACTUALIZAR AHORA SÍ O SÍ RECARGA EL PRECIO
 if st.button("🔄 ACTUALIZAR PRECIO AHORA"):
-    forzar_actualizacion()
+    obtener_precio_real()
+    st.rerun()
 
 st.divider()
 
@@ -80,7 +86,8 @@ with st.sidebar:
         tipo = st.selectbox("Tipo", ["Compra", "Retiro"])
         fecha = st.date_input("Fecha", datetime.now())
         precio_f = st.number_input("Precio USD", value=precio_actual, format="%.2f")
-        monto_f = st.number_input("Monto BTC (8 decimales)", min_value=0.0, format="%.8f", step=0.00000001)
+        # Aquí permitimos 8 decimales en la entrada
+        monto_f = st.number_input("Monto BTC", min_value=0.0, format="%.8f", step=0.00000001)
         
         if st.form_submit_button("🚀 Guardar Registro"):
             if monto_f > 0:
@@ -89,29 +96,26 @@ with st.sidebar:
                 df_final.to_csv(db_file, index=False)
                 st.success("✅ Guardado")
                 st.rerun()
-            else:
-                st.error("El monto debe ser mayor a 0")
 
     st.divider()
-    st.header("⚠️ Zona de Edición")
     if st.button("🗑️ Borrar última fila"):
         if not df.empty:
             df = df[:-1]
             df.to_csv(db_file, index=False)
-            st.warning("Fila eliminada")
             st.rerun()
 
-# --- HISTORIAL CON PRECISIÓN ---
+# --- HISTORIAL (CORREGIDO PARA EVITAR EL ERROR DE LA IMAGEN) ---
 st.subheader("📜 Historial Detallado")
 if not df.empty:
-    # Formateamos la tabla para que muestre todos los decimales de BTC
-    df_mostrar = df.iloc[::-1].copy()
+    df_visible = df.iloc[::-1].copy()
+    # En lugar de usar .style (que da error), usamos una configuración simple de Streamlit
     st.dataframe(
-        df_mostrar.style.format({
-            'Monto_BTC': '{:.8f}',
-            'Precio_USD': '${:,.2;f}'
-        }),
-        use_container_width=True
+        df_visible, 
+        use_container_width=True,
+        column_config={
+            "Monto_BTC": st.column_config.NumberColumn("Monto BTC", format="%.8f"),
+            "Precio_USD": st.column_config.NumberColumn("Precio USD", format="$%.2f")
+        }
     )
 else:
     st.info("Sin registros.")
