@@ -105,20 +105,23 @@ with t3:
         c1, c2 = st.columns(2)
         tipo = c1.selectbox("Tipo", ["Compra", "Retiro"])
         fecha = c1.date_input("Fecha", datetime.now())
-        precio = c2.number_input("Precio USD", value=precio_mercado, format="%.2f")
+        
+        # CAMBIO CLAVE: El valor por defecto es el precio actual, 
+        # pero Streamlit guardará lo que tú escribas encima.
+        precio_manual = c2.number_input("Precio USD (Histórico)", value=precio_mercado, format="%.2f")
         monto = c2.number_input("Monto BTC", format="%.8f", step=0.00000001)
         
         if st.form_submit_button("💾 Guardar en Supabase"):
             if monto > 0:
                 try:
-                    # Guardamos directamente en la tabla de Supabase
+                    # Usamos 'precio_manual' para asegurar que se guarde lo que tú pusiste
                     supabase.table('historial_btc').insert({
                         "Fecha": str(fecha),
                         "Tipo": tipo,
-                        "Precio_USD": float(precio),
+                        "Precio_USD": float(precio_manual),
                         "Monto_BTC": float(monto)
                     }).execute()
-                    st.success("¡Datos guardados para siempre!")
+                    st.success(f"✅ ¡Guardado con éxito a ${precio_manual:,.2f}!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
